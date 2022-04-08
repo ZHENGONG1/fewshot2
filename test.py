@@ -64,7 +64,8 @@ if __name__ == '__main__':
         model           = BaselineFinetune( model_dict[params.model], loss_type = 'dist', **few_shot_params )
     elif params.method == 'baseline_soft':
         model           = BaselineFinetune_soft( model_dict[params.model], **few_shot_params)
-       # model = BaselineFinetune(model_dict[params.model], **few_shot_params)
+      #  model = BaselineFinetune(model_dict[params.model], **few_shot_params)
+      #  model           = BaselineFinetune( model_dict[params.model], loss_type = 'dist', **few_shot_params )
     elif params.method == 'protonet':
         model           = ProtoNet( model_dict[params.model], **few_shot_params )
     elif params.method == 'matchingnet':
@@ -152,7 +153,9 @@ if __name__ == '__main__':
         cl_data_file = feat_loader.init_loader(novel_file)
 
         for i in range(iter_num):
+            
             acc = feature_evaluation(cl_data_file, model, n_query = 15, adaptation = params.adaptation, **few_shot_params)
+            print('experiment {:d}: acc = {:.4f}'.format((i+1),acc))
             acc_all.append(acc)
 
         acc_all  = np.asarray(acc_all)

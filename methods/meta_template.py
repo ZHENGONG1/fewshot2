@@ -93,7 +93,7 @@ class MetaTemplate(nn.Module):
         assert is_feature == True, 'Feature is fixed in further adaptation'
         z_support, z_query  = self.parse_feature(x,is_feature)
 
-        z_support   = z_support.contiguous().view(se\\self.n_way* self.n_support, -1 )
+        z_support   = z_support.contiguous().view(self.n_way* self.n_support, -1 )
         z_query     = z_query.contiguous().view(self.n_way* self.n_query, -1 )
 
         y_support = torch.from_numpy(np.repeat(range( self.n_way ), self.n_support ))
