@@ -27,7 +27,7 @@ class BaselineTrainSoft(nn.Module):
             for j in range(0, K):
                 self.weight[i * K + j, i * K + j + 1:(i + 1) * K] = 1
         init.kaiming_uniform_(self.fc, a=math.sqrt(5))
-        self.DBval = False  # only set True for CUB dataset, see issue #31
+        self.DBval = True  # only set True for CUB dataset, see issue #31
 
 
     def forward(self, x):
