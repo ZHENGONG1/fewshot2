@@ -1,174 +1,140 @@
-import torch
-import numpy as np
-from torch.autograd import Variable
-import torch.nn as nn
-import torch.optim
-import json
-import torch.utils.data.sampler
-import os
-import glob
-import random
-import time
-
-import configs
 import backbone
-import data.feature_loader as feat_loader
-from data.datamgr import SetDataManager
-from methods.baselinetrain import BaselineTrain
-from methods.baselinefinetune import BaselineFinetune, BaselineFinetune_soft
-from methods.baselinetrain_softtriple import BaselineTrainSoft
-from methods.protonet import ProtoNet
-from methods.matchingnet import MatchingNet
-from methods.relationnet import RelationNet
-from methods.maml import MAML
-from io_utils import model_dict, parse_args, get_resume_file, get_best_file , get_assigned_file
+import torch
+import torch.nn as nn
+from torch.autograd import Variable
+import numpy as np
+import torch.nn.functional as F
+from methods.meta_template import MetaTemplate
+from torch.nn.parameter import Parameter
+import math
+from torch.nn import init
 
-def feature_evaluation(cl_data_file, model, n_way = 5, n_support = 5, n_query = 15, adaptation = False):
-    class_list = cl_data_file.keys()
+class BaselineFinetune(MetaTemplate):
+    def __init__(self, model_func,  n_way, n_support, loss_type = "softmax"):
+        super(BaselineFinetune, self).__init__( model_func,  n_way, n_support)
+        self.loss_type = loss_type
 
-    select_class = random.sample(class_list,n_way)
-    z_all  = []
-    for cl in select_class:
-        img_feat = cl_data_file[cl]
-        perm_ids = np.random.permutation(len(img_feat)).tolist()
-        z_all.append( [ np.squeeze( img_feat[perm_ids[i]]) for i in range(n_support+n_query) ] )     # stack each batch
+    def set_forward(self,x,is_feature = True):
+        return self.set_forward_adaptation(x,is_feature); #Baseline always do adaptation
+ 
+    def set_forward_adaptation(self,x,is_feature = True):
+        assert is_feature == True, 'Baseline only support testing with feature'
+        z_support, z_query  = self.parse_feature(x,is_feature)
 
-    z_all = torch.from_numpy(np.array(z_all) )
-   
-    model.n_query = n_query
-    if adaptation:
-        scores  = model.set_forward_adaptation(z_all, is_feature = True)
-    else:
-        scores  = model.set_forward(z_all, is_feature = True)
-    pred = scores.data.cpu().numpy().argmax(axis = 1)
-    y = np.repeat(range( n_way ), n_query )
-    acc = np.mean(pred == y)*100 
-    return acc
+        z_support   = z_support.contiguous().view(self.n_way* self.n_support, -1 )
+        z_query     = z_query.contiguous().view(self.n_way* self.n_query, -1 )
 
-if __name__ == '__main__':
-    params = parse_args('test')
+        y_support = torch.from_numpy(np.repeat(range( self.n_way ), self.n_support ))
+        y_support = Variable(y_support.cuda())
 
-    acc_all = []
+        if (self.loss_type == 'softmax'):
+            linear_clf = nn.Linear(self.feat_dim, self.n_way)
+        elif self.loss_type == 'dist':        
+            linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
+           
+        linear_clf = linear_clf.cuda()
 
-    iter_num = 600
+        set_optimizer = torch.optim.SGD(linear_clf.parameters(), lr = 0.01, momentum=0.9, dampening=0.9, weight_decay=0.001)
 
-    few_shot_params = dict(n_way = params.test_n_way , n_support = params.n_shot) 
-
-    if params.dataset in ['omniglot', 'cross_char']:
-        assert params.model == 'Conv4' and not params.train_aug ,'omniglot only support Conv4 without augmentation'
-        params.model = 'Conv4S'
-
-    if params.method == 'baseline':
-        model           = BaselineFinetune( model_dict[params.model], **few_shot_params )
-    elif params.method == 'baseline++':
-        model           = BaselineFinetune( model_dict[params.model], loss_type = 'dist', **few_shot_params )
-    elif params.method == 'baseline_soft':
-        model           = BaselineFinetune_soft( model_dict[params.model], **few_shot_params)
-      #  model = BaselineFinetune(model_dict[params.model], **few_shot_params)
-      #  model           = BaselineFinetune( model_dict[params.model], loss_type = 'dist', **few_shot_params )
-    elif params.method == 'protonet':
-        model           = ProtoNet( model_dict[params.model], **few_shot_params )
-    elif params.method == 'matchingnet':
-        model           = MatchingNet( model_dict[params.model], **few_shot_params )
-    elif params.method in ['relationnet', 'relationnet_softmax']:
-        if params.model == 'Conv4': 
-            feature_model = backbone.Conv4NP
-        elif params.model == 'Conv6': 
-            feature_model = backbone.Conv6NP
-        elif params.model == 'Conv4S': 
-            feature_model = backbone.Conv4SNP
-        else:
-            feature_model = lambda: model_dict[params.model]( flatten = False )
-        loss_type = 'mse' if params.method == 'relationnet' else 'softmax'
-        model           = RelationNet( feature_model, loss_type = loss_type , **few_shot_params )
-    elif params.method in ['maml' , 'maml_approx']:
-        backbone.ConvBlock.maml = True
-        backbone.SimpleBlock.maml = True
-        backbone.BottleneckBlock.maml = True
-        backbone.ResNet.maml = True
-        model = MAML(  model_dict[params.model], approx = (params.method == 'maml_approx') , **few_shot_params )
-        if params.dataset in ['omniglot', 'cross_char']: #maml use different parameter in omniglot
-            model.n_task     = 32
-            model.task_update_num = 1
-            model.train_lr = 0.1
-    else:
-       raise ValueError('Unknown method')
-
-    model = model.cuda()
-
-    checkpoint_dir = '%s/checkpoints/%s/%s_%s' %(configs.save_dir, params.dataset, params.model, params.method)
-    if params.train_aug:
-        checkpoint_dir += '_aug'
-    if not params.method in ['baseline', 'baseline++', 'baseline_soft'] :
-        checkpoint_dir += '_%dway_%dshot' %( params.train_n_way, params.n_shot)
-
-    #modelfile   = get_resume_file(checkpoint_dir)
-
-    if not params.method in ['baseline', 'baseline++', 'baseline_soft'] :
-        if params.save_iter != -1:
-            modelfile   = get_assigned_file(checkpoint_dir,params.save_iter)
-        else:
-            modelfile   = get_best_file(checkpoint_dir)
-        if modelfile is not None:
-            tmp = torch.load(modelfile)
-            model.load_state_dict(tmp['state'])
-
-    split = params.split
-    if params.save_iter != -1:
-        split_str = split + "_" +str(params.save_iter)
-    else:
-        split_str = split
-    if params.method in ['maml', 'maml_approx']: #maml do not support testing with feature
-        if 'Conv' in params.model:
-            if params.dataset in ['omniglot', 'cross_char']:
-                image_size = 28
-            else:
-                image_size = 84 
-        else:
-            image_size = 224
-
-        datamgr         = SetDataManager(image_size, n_eposide = iter_num, n_query = 15 , **few_shot_params)
+        loss_function = nn.CrossEntropyLoss()
+        loss_function = loss_function.cuda()
         
-        if params.dataset == 'cross':
-            if split == 'base':
-                loadfile = configs.data_dir['miniImagenet'] + 'all.json' 
-            else:
-                loadfile   = configs.data_dir['CUB'] + split +'.json'
-        elif params.dataset == 'cross_char':
-            if split == 'base':
-                loadfile = configs.data_dir['omniglot'] + 'noLatin.json' 
-            else:
-                loadfile  = configs.data_dir['emnist'] + split +'.json' 
-        else: 
-            loadfile    = configs.data_dir[params.dataset] + split + '.json'
+        batch_size = 4
+        support_size = self.n_way* self.n_support
+        for epoch in range(100):
+            rand_id = np.random.permutation(support_size)
+            for i in range(0, support_size , batch_size):
+                set_optimizer.zero_grad()
+                selected_id = torch.from_numpy( rand_id[i: min(i+batch_size, support_size) ]).cuda()
+                z_batch = z_support[selected_id]
+                y_batch = y_support[selected_id] 
+                scores = linear_clf(z_batch)
+                loss = loss_function(scores,y_batch)
+                loss.backward()
+                set_optimizer.step()
+        scores = linear_clf(z_query)
+        return scores
 
-        novel_loader     = datamgr.get_data_loader( loadfile, aug = False)
-        if params.adaptation:
-            model.task_update_num = 100 #We perform adaptation on MAML simply by updating more times.
-        model.eval()
-        acc_mean, acc_std = model.test_loop( novel_loader, return_std = True)
 
-    else:
-        novel_file = os.path.join( checkpoint_dir.replace("checkpoints","features"), split_str +".hdf5") #defaut split = novel, but you can also test base or val classes
-        cl_data_file = feat_loader.init_loader(novel_file)
+    def set_forward_loss(self,x):
+        raise ValueError('Baseline predict on pretrained feature and do not support finetune backbone')
 
-        for i in range(iter_num):
-            
-            acc = feature_evaluation(cl_data_file, model, n_query = 15, adaptation = params.adaptation, **few_shot_params)
-            print('experiment {:d}: acc = {:.4f}'.format((i+1),acc))
-            acc_all.append(acc)
 
-        acc_all  = np.asarray(acc_all)
-        acc_mean = np.mean(acc_all)
-        acc_std  = np.std(acc_all)
-        print('%d Test Acc = %4.2f%% +- %4.2f%%' %(iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num)))
-    with open('./record/results.txt' , 'a') as f:
-        timestamp = time.strftime("%Y%m%d-%H%M%S", time.localtime()) 
-        aug_str = '-aug' if params.train_aug else ''
-        aug_str += '-adapted' if params.adaptation else ''
-        if params.method in ['baseline', 'baseline++'] :
-            exp_setting = '%s-%s-%s-%s%s %sshot %sway_test' %(params.dataset, split_str, params.model, params.method, aug_str, params.n_shot, params.test_n_way )
-        else:
-            exp_setting = '%s-%s-%s-%s%s %sshot %sway_train %sway_test' %(params.dataset, split_str, params.model, params.method, aug_str , params.n_shot , params.train_n_way, params.test_n_way )
-        acc_str = '%d Test Acc = %4.2f%% +- %4.2f%%' %(iter_num, acc_mean, 1.96* acc_std/np.sqrt(iter_num))
-        f.write( 'Time: %s, Setting: %s, Acc: %s \n' %(timestamp,exp_setting,acc_str)  )
+class BaselineFinetune_soft(MetaTemplate):
+    def __init__(self, model_func, n_way, n_support):
+        super(BaselineFinetune_soft, self).__init__(model_func, n_way, n_support)
+        self.k = 2
+        self.gamma = 0.2
+        self.la = 20
+        self.fc = Parameter(torch.Tensor(self.feat_dim, self.n_way * self.k))
+        self.weight = torch.zeros(self.n_way * self.k, self.n_way * self.k, dtype=torch.bool).cuda()
+        for i in range(0, self.n_way):
+            for j in range(0, self.k):
+                self.weight[i*self.k+j, i*self.k+j+1:(i+1)*self.k] = 1
+        init.kaiming_uniform_(self.fc, a=math.sqrt(5))
+
+    def set_forward(self, x, is_feature=True):
+        return self.set_forward_adaptation(x, is_feature);  # Baseline always do adaptation
+
+    def set_forward_adaptation(self, x, is_feature=True):
+        assert is_feature == True, 'Baseline only support testing with feature'
+        z_support, z_query = self.parse_feature(x, is_feature)
+
+        z_support = z_support.contiguous().view(self.n_way * self.n_support, -1)
+        z_query = z_query.contiguous().view(self.n_way * self.n_query, -1)
+
+        y_support = torch.from_numpy(np.repeat(range(self.n_way), self.n_support))
+        y_support = Variable(y_support.cuda())
+
+
+        # linear_clf = nn.Linear(self.feat_dim, self.n_way*self.k)#1600*50
+        # linear_clf = linear_clf.cuda()
+
+        # linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
+        # linear_clf = linear_clf.cuda()
+        
+
+        # set_optimizer = torch.optim.SGD(linear_clf.parameters(), lr=0.02, momentum=0.9, dampening=0.9,
+        #                                 weight_decay=0.001)
+        
+        set_optimizer = torch.optim.Adam([{'params':self.fc,'lr':0.02}],  eps=0.01, weight_decay=0.0001)
+
+        loss_function = nn.CrossEntropyLoss()
+        loss_function = loss_function.cuda()
+
+        batch_size = 4
+        support_size = self.n_way * self.n_support
+        for epoch in range(100):
+            rand_id = np.random.permutation(support_size)
+            for i in range(0, support_size, batch_size):
+                set_optimizer.zero_grad()
+                selected_id = torch.from_numpy(rand_id[i: min(i + batch_size, support_size)]).cuda()
+                z_batch = z_support[selected_id]
+                y_batch = y_support[selected_id]
+                
+                
+                centers = F.normalize(self.fc, p=2, dim=0)
+                simInd = z_batch.matmul(centers)
+                simStruc = simInd.reshape(-1, self.n_way, self.k)
+                # scores = linear_clf(z_batch) # dim(scores) = 50, fc层
+                # simStruc = scores.reshape(-1, self.n_way, self.k) # simstruc = 5*10
+                prob = F.softmax(simStruc * self.gamma, dim=2) # prob = 5*10
+                simClass = torch.sum(prob * simStruc, dim=2) #dim(simClass) = 5
+
+                loss = loss_function(simClass, y_batch)
+                loss.backward()
+                set_optimizer.step()
+
+        centers = F.normalize(self.fc, p=2, dim=0)
+        simInd = z_query.matmul(centers)
+        simStruc = simInd.reshape(-1, self.n_way, self.k)        
+        # scores = linear_clf(z_query)
+        # simStruc = scores.reshape(-1, self.n_way, self.k) # simstruc = 5*10
+        prob = F.softmax(simStruc * self.gamma, dim=2) # prob = 5*10
+        simClass = torch.sum(prob * simStruc, dim=2) #dim(simClass) = 5
+        return simClass
+
+    def set_forward_loss(self, x):
+        raise ValueError('Baseline predict on pretrained feature and do not support finetune backbone')
+        
+

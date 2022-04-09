@@ -95,6 +95,7 @@ if __name__ == '__main__':
        raise ValueError('Unknown method')
 
     model = model.cuda()
+   
 
     checkpoint_dir = '%s/checkpoints/%s/%s_%s' %(configs.save_dir, params.dataset, params.model, params.method)
     if params.train_aug:
@@ -153,7 +154,7 @@ if __name__ == '__main__':
         cl_data_file = feat_loader.init_loader(novel_file)
 
         for i in range(iter_num):
-            
+            print()
             acc = feature_evaluation(cl_data_file, model, n_query = 15, adaptation = params.adaptation, **few_shot_params)
             print('experiment {:d}: acc = {:.4f}'.format((i+1),acc))
             acc_all.append(acc)
