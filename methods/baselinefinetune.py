@@ -88,8 +88,10 @@ class BaselineFinetune_soft(MetaTemplate):
 
 
         # linear_clf = nn.Linear(self.feat_dim, self.n_way*self.k)#1600*50
+        #linear_clf = nn.Linear(self.feat_dim, self.n_way)#1600*5
         # linear_clf = linear_clf.cuda()
 
+        # linear_clf = backbone.distLinear(self.feat_dim, self.n_way*self.k)
         # linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
         # linear_clf = linear_clf.cuda()
         
