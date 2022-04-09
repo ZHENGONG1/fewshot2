@@ -106,6 +106,22 @@ class BaselineFinetune_soft(MetaTemplate):
 
         batch_size = 4
         support_size = self.n_way * self.n_support
+        # uncomment only if you want to use baseline and baseline++ structure for finetuning
+        # for epoch in range(100):
+        #     rand_id = np.random.permutation(support_size)
+        #     for i in range(0, support_size , batch_size):
+        #         set_optimizer.zero_grad()
+        #         selected_id = torch.from_numpy( rand_id[i: min(i+batch_size, support_size) ]).cuda()
+        #         z_batch = z_support[selected_id]
+        #         y_batch = y_support[selected_id] 
+        #         scores = linear_clf(z_batch)
+        #         loss = loss_function(scores,y_batch)
+        #         loss.backward()
+        #         set_optimizer.step()
+        # scores = linear_clf(z_query)
+        # return scores
+
+        # Softtriple Finetune
         for epoch in range(100):
             rand_id = np.random.permutation(support_size)
             for i in range(0, support_size, batch_size):

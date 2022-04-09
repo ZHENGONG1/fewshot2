@@ -30,6 +30,7 @@ def parse_args(script):
     parser.add_argument('--margin', default=0.01, type=float, help='margin of soft triple')
     parser.add_argument('--modellr', default=0.0001, type=float, help='model learning rate of soft triple')
     parser.add_argument('--centerlr', default=0.01, type=float, help='center learning rate of soft triple')
+    # parser.add_argument('--rate', default=0.1, type=float, help='decay rate')
     if script == 'train':
         parser.add_argument('--num_classes' , default=200, type=int, help='total number of classes in softmax, only used in baseline') #make it larger than the maximum label value in base class
         parser.add_argument('--save_freq'   , default=50, type=int, help='Save frequency')

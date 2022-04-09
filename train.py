@@ -20,6 +20,12 @@ from methods.maml import MAML
 from methods.baselinetrain_softtriple import BaselineTrainSoft
 from io_utils import model_dict, parse_args, get_resume_file  
 
+# def adjust_learning_rate(optimizer, epoch, params):
+#     # decayed lr by 10 every 20 epochs
+#     if (epoch+1)%20 == 0:
+#         for param_group in optimizer.param_groups:
+#             param_group['lr'] *= params.rate
+
 def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch, params):    
     if optimization == 'Adam':
         optimizer = torch.optim.Adam(model.parameters())
@@ -35,6 +41,9 @@ def train(base_loader, val_loader, model, optimization, start_epoch, stop_epoch,
         model.train()
         model.train_loop(epoch, base_loader,  optimizer ) #model are called by reference, no need to return 
         model.eval()
+
+        # if params.method == 'baseline_soft':
+        #     adjust_learning_rate(optimizer, epoch, params)
 
         if not os.path.isdir(params.checkpoint_dir):
             os.makedirs(params.checkpoint_dir)
