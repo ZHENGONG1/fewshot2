@@ -92,8 +92,8 @@ class BaselineFinetune_soft(MetaTemplate):
         # linear_clf = linear_clf.cuda()
 
         # linear_clf = backbone.distLinear(self.feat_dim, self.n_way*self.k)
-        linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
-        linear_clf = linear_clf.cuda()
+        # linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
+        # linear_clf = linear_clf.cuda()
         
 
         # set_optimizer = torch.optim.SGD(linear_clf.parameters(), lr=0.02, momentum=0.9, dampening=0.9,

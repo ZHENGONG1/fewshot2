@@ -1,5 +1,10 @@
-# Update only for CS680 course
+# Update only for CS680 course University of Waterloo
 Please see change_log.ipynb
+
+Author:
+Zhen Gong 20673670
+Yuzhe You 20926068
+
 
 Citation of resources:
 ```
