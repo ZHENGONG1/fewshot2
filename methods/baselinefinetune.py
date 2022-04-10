@@ -65,7 +65,7 @@ class BaselineFinetune_soft(MetaTemplate):
         super(BaselineFinetune_soft, self).__init__(model_func, n_way, n_support)
         self.k = 2
         self.gamma = 0.2
-        self.la = 20
+
         self.fc = Parameter(torch.Tensor(self.feat_dim, self.n_way * self.k))
         self.weight = torch.zeros(self.n_way * self.k, self.n_way * self.k, dtype=torch.bool).cuda()
         for i in range(0, self.n_way):
@@ -88,18 +88,18 @@ class BaselineFinetune_soft(MetaTemplate):
 
 
         # linear_clf = nn.Linear(self.feat_dim, self.n_way*self.k)#1600*50
-        #linear_clf = nn.Linear(self.feat_dim, self.n_way)#1600*5
+        # linear_clf = nn.Linear(self.feat_dim, self.n_way)#1600*5
         # linear_clf = linear_clf.cuda()
 
         # linear_clf = backbone.distLinear(self.feat_dim, self.n_way*self.k)
-        # linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
-        # linear_clf = linear_clf.cuda()
+        linear_clf = backbone.distLinear(self.feat_dim, self.n_way)
+        linear_clf = linear_clf.cuda()
         
 
         # set_optimizer = torch.optim.SGD(linear_clf.parameters(), lr=0.02, momentum=0.9, dampening=0.9,
         #                                 weight_decay=0.001)
         
-        set_optimizer = torch.optim.Adam([{'params':self.fc,'lr':0.02}],  eps=0.01, weight_decay=0.0001)
+        set_optimizer = torch.optim.Adam([{'params':self.fc,'lr':0.01}],  eps=0.01, weight_decay=0.0001)
 
         loss_function = nn.CrossEntropyLoss()
         loss_function = loss_function.cuda()
@@ -129,8 +129,7 @@ class BaselineFinetune_soft(MetaTemplate):
                 selected_id = torch.from_numpy(rand_id[i: min(i + batch_size, support_size)]).cuda()
                 z_batch = z_support[selected_id]
                 y_batch = y_support[selected_id]
-                
-                
+                     
                 centers = F.normalize(self.fc, p=2, dim=0)
                 simInd = z_batch.matmul(centers)
                 simStruc = simInd.reshape(-1, self.n_way, self.k)
@@ -138,19 +137,22 @@ class BaselineFinetune_soft(MetaTemplate):
                 # simStruc = scores.reshape(-1, self.n_way, self.k) # simstruc = 5*10
                 prob = F.softmax(simStruc * self.gamma, dim=2) # prob = 5*10
                 simClass = torch.sum(prob * simStruc, dim=2) #dim(simClass) = 5
-
+        
                 loss = loss_function(simClass, y_batch)
                 loss.backward()
                 set_optimizer.step()
-
+        
         centers = F.normalize(self.fc, p=2, dim=0)
         simInd = z_query.matmul(centers)
         simStruc = simInd.reshape(-1, self.n_way, self.k)        
         # scores = linear_clf(z_query)
         # simStruc = scores.reshape(-1, self.n_way, self.k) # simstruc = 5*10
+
         prob = F.softmax(simStruc * self.gamma, dim=2) # prob = 5*10
         simClass = torch.sum(prob * simStruc, dim=2) #dim(simClass) = 5
         return simClass
+       
+
 
     def set_forward_loss(self, x):
         raise ValueError('Baseline predict on pretrained feature and do not support finetune backbone')
